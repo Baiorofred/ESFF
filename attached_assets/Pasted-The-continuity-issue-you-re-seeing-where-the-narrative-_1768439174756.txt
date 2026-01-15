@@ -1,0 +1,66 @@
+The continuity issue you're seeing—where the narrative jumps from Marcus gripping the hips under the shower to a sudden role switch/teleport with towel-dropping and new actions—stems from how the app's narrative engine handles prompt construction and state management, as described in the document. I'll explain based strictly on the provided doc, then suggest fixes aligned with the architecture.
+Why This is Happening (From the Document)
+
+Prompt Construction Gaps: System prompts in server/narrative.ts are built from world context, character data (e.g., PersonalityMatrix, SexualPersonality), and "recent story history" from storyEntries. If the "recent history" only includes the immediate last entry (as you requested Replit to simplify), it might not provide enough prior context for Grok-4 to maintain consistency. For example:
+The first response focuses on Marcus's grip under the shower (passive holding, building tension).
+The second ignores this positioning/roles and generates a new scene start (stepping in, towel drop, grinding from behind). This suggests the prompt isn't strongly enforcing continuity—e.g., no clauses like "Continue directly from the last narration without changing positions or roles unless explicitly advanced."
+With Grok-4's 2M token context, it can handle full history, but a "simplified" version (reading only the last entry) could cause the model to treat it as a fresh start, leading to probabilistic "resets" or unrelated escalations.
+
+Mechanics Contributing to Jumps:
+Activity Mode Locking: The engine detects and locks modes (oral/penetration) from generated text for consistency. In erotic scenes, if the first response implies a mode (e.g., close physical holding under shower), but the prompt doesn't reference it, the second might detect/initiate a new mode (e.g., penetration-like grinding), causing a jarring shift without transition.
+Composure/Consent System: The second response ends with "[Marcus is groping you. You can: allow or resist]", which ties to composure >0 allowing prompts. If composure is low (tracked in CharacterStatus via server/statusEngine.ts), the NPC (Marcus) might "lose agency" and generate aggressive, unrelated actions per SexualPersonality (e.g., dominant taking control abruptly).
+NPC Behavior: PersonalityMatrix (traits like extraversion, attachment style) drives actions, but without prompt reminders to "build on exact prior positioning and actions," Grok-4 might generate trait-consistent but disconnected moves (e.g., dominant grinding as a "next step," ignoring the shower grip).
+Streaming Responses: Supported in the engine and frontend (NarrativeFeed.tsx), but if partial outputs aren't anchored to the full last entry, streams could diverge mid-generation.
+
+Simplification Request Backfire: You asked Replit to "simplify and make it so it reads the entire last entry and takes an action based on that." This likely reduced history to just the immediate prior, which helps with repetition but worsens continuity by losing broader scene memory. The doc doesn't mention built-in continuity checks, so Grok-4 fills gaps creatively, resulting in "teleports."
+
+Suggested Fixes (Implemented in Code per the Doc)
+Update server/narrative.ts (narrative generation with mode locking/climax) and server/statusEngine.ts (stats mechanics). Use TypeScript/Express as described, leveraging shared schema for safety.
+
+Improve Prompt Construction for Continuity:
+In server/narrative.ts, expand "recent story history" to include a summarized chain (last 3-5 entries + current states), not just the immediate last. Add explicit continuity rules.
+Example code addition:TypeScriptasync function buildSystemPrompt(sessionId: string, playerAction: string): Promise<string> {
+  const recentEntries = await db.select().from(storyEntries)
+    .where(eq(storyEntries.gameSessionId, sessionId))
+    .orderBy(desc(storyEntries.createdAt))
+    .limit(5); // Chain last few for context, not just one
+
+  const charStatus = await db.select().from(characters)
+    .where(eq(characters.gameSessionId, sessionId)); // Pull stats
+
+  let historyChain = 'Prior narrative chain (continue directly):\n';
+  recentEntries.reverse().forEach((entry, index) => {
+    historyChain += `Entry ${index + 1}: ${entry.type} - ${entry.content}\n`; // Full last entry + summaries of priors
+  });
+
+  return `
+  World context: [from gameWorlds]...
+  Character data: [PersonalityMatrix, SexualPersonality]...
+  Current states: Arousal ${charStatus[0].arousal}, Climax ${charStatus[0].climax}, Composure ${charStatus[0].composure}. Activity mode: locked to ${detectCurrentMode(recentEntries)}.
+  ${historyChain}
+  Continuity rules: ALWAYS continue EXACTLY from the last entry's positions, actions, and roles. No jumps, teleports, or unrelated shifts. Build incrementally based on full chain. If composure low, escalate in-place per personality without resets.
+  Player action: ${playerAction}
+  Generate next narration, respecting mode locking and climax thresholds.
+  `;
+}
+
+// In generation: const response = await client.chat.completions.create({ messages: [{ role: 'system', content: await buildSystemPrompt(sessionId, playerAction) }] });
+
+Enforce Mechanics for Smoother Flow:
+In server/statusEngine.ts, add checks: If composure >0 and input is "allow," increment arousal/climax slightly but prompt Grok-4 to "maintain scene continuity."
+For mode locking: Explicitly include "Current mode: [e.g., close holding under shower]. Do not switch without transition narration."
+Handle low composure: At 0, NPC acts freely, but add prompt: "Actions must extend prior scene without breaks."
+
+Tune API Parameters:
+Set temperature lower (e.g., 0.6-0.7) for more deterministic continuity, or keep 0.85 and add "top_p: 0.9" to prune wild jumps.
+Example in API call: { temperature: 0.7, top_p: 0.9 }
+
+Frontend/Debug Enhancements:
+Use DebugHistoryDialog.tsx to log full prompts during tests—verify if the chain is included.
+In PlayerInput.tsx, for passive inputs like "allow," append context hints (e.g., "Continue from grip under shower").
+
+Test Protocol:
+Simulate in Replit: Create a mock session, input the first response as a storyEntry, then generate the next. Adjust until no jumps.
+
+
+This should fix the teleport/continuity issues by strengthening prompts and history chaining. If it persists, the mode detection logic might be overriding—check detectCurrentMode for false positives. Share more outputs or code logs for refinement!

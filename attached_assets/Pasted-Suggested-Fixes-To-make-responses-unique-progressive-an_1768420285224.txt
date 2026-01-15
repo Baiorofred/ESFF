@@ -1,0 +1,87 @@
+Suggested Fixes
+To make responses unique, progressive, and goal-oriented, tweak your Replit code (assuming Python or similar for the loop). Focus on prompt engineering first, as it's the cheapest fix. I'll provide sample code snippets.
+
+Strengthen the System Prompt:
+Add explicit rules for avoidance and progression. Make it the first part of every generation call.
+Define Mara's personality and goals clearly, and remind the model to reference them.
+Example refined system prompt (prepend this to every API call or generation):textYou are the Narrator in an erotic MUD game set in [Hotel Room 1408]. The NPC is Mara: mid-30s, athletic build, short dark hair, impatient and direct personality, dressed in tight black leggings and a thin white tank top. Her goal: Seduce the player aggressively but consensually, escalating to explicit erotic acts (kissing, undressing, touching, intercourse) while building tension. She is confident, unapologetic, and pushes boundaries if allowed.
+
+Rules:
+- ALWAYS advance the plot toward Mara's goal. Do not stall or repeat actions/descriptions.
+- Read the full prior history, but SUMMARIZE it internally—do not copy phrases verbatim.
+- Avoid repetition: Check prior responses and vary wording, actions, and details. If something was described (e.g., room, Mara's appearance), reference it briefly or imply it—never repeat full blocks.
+- For user actions like "Look": Provide fresh, escalating details that tie into Mara's goal (e.g., reveal more intimate aspects if repeated).
+- Generate 1-3 unique NPC actions per turn, progressing physically/emotionally (e.g., from staring to touching to more explicit).
+- Use [Action prompts] for consent (e.g., [Mara is X. You can: allow or resist]), but limit to 1 per response to avoid loops.
+- Keep responses concise (200-400 words), erotic but not gratuitous unless progressed.
+- End with the room header only if significantly changed; otherwise, omit to save space.
+
+Prior history summary: [Insert condensed history here, e.g., "Player entered room, stared at Mara repeatedly. Mara grew impatient, initiated kiss, undressed partially. Now escalating touch."]
+
+User input: [User's latest command]
+
+Generate the next Narrator response.
+In code, dynamically generate the "Prior history summary" by keeping a running summary variable (update it each turn) instead of dumping the full transcript. This prevents overload.
+
+Implement History Summarization in Code:
+Use a variable to track a short summary, updating it after each response.
+Example Python snippet (assuming you're using requests to call Grok API):Pythonimport requests
+import json
+
+# API setup (replace with your xAI API key/endpoint)
+API_URL = "https://api.x.ai/v1/chat/completions"  # Hypothetical; check xAI docs
+API_KEY = "your_api_key_here"
+
+# Initial setup
+history_summary = "Player enters Hotel Room 1408. Mara at minibar, back turned. Scenario starts."
+
+def generate_response(user_input, full_history):
+    # Update summary (you could use Grok to summarize, but for efficiency, do it manually or with simple logic)
+    global history_summary
+    history_summary += f" Player: {user_input}. Narrator advanced toward seduction."
+
+    prompt = f"""[System prompt as above, with {history_summary} inserted] User input: {user_input}"""
+
+    payload = {
+        "model": "grok-4",  # Or whatever the model name is
+        "messages": [{"role": "system", "content": prompt}],
+        "temperature": 0.8,  # Increase from default (0.7) for more variety, less repetition
+        "max_tokens": 400,   # Limit to prevent rambling
+        "top_p": 0.9         # For diversity
+    }
+
+    response = requests.post(API_URL, headers={"Authorization": f"Bearer {API_KEY}"}, json=payload)
+    generated_text = json.loads(response.text)["choices"][0]["message"]["content"]
+
+    # Post-process: If detected repetition (simple check), regenerate
+    if any(repeated_phrase in generated_text for repeated_phrase in ["short, sharp sigh", "fingers drumming"]):  # Add known repeats
+        return generate_response(user_input, full_history)  # Recursive retry
+
+    # Append to full_history for logging, but don't feed full to prompt
+    full_history.append({"user": user_input, "narrator": generated_text})
+    return generated_text
+
+# Game loop example
+full_history = []
+while True:
+    user_input = input("Your action: ")
+    if user_input.lower() == "quit": break
+    print("Narrator:", generate_response(user_input, full_history))
+
+Tune Generation Parameters:
+Increase temperature (0.8-1.0) for creativity.
+Use top_p or top_k sampling to avoid predictable outputs.
+Add a retry mechanism if output matches patterns from history (e.g., regex check for repeated sentences).
+
+Handle Passive User Inputs Better:
+For commands like "Look at Mara" repeated, prompt the model to escalate: "If user repeats looks, reveal more erotic details and have Mara react impatiently to advance."
+Cap loops: In code, track repeat counts (e.g., if "Look" >3 times, force Mara to act aggressively).
+
+Progression Toward Goals:
+Define stages in the scenario (e.g., Stage 1: Teasing, Stage 2: Undressing, Stage 3: Explicit acts). Track current stage in a variable and include in prompt: "Current stage: 2 - Escalate to touching."
+For the "no composure left" loop, add: "Only use '[You have no composure left]' once, when climax is near; otherwise, describe uniquely."
+
+Test Iteratively:
+Run short sessions with debug prints of the full prompt sent to the API.
+If using code_execution tool here (since you have it), I could simulate a mini-version, but for this, the above should suffice.
+Edge case: In erotic content, ensure prompt allows dark/violent themes per guidelines, but focus on consent mechanics to avoid abrupt ends.
